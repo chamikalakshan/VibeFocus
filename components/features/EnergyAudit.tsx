@@ -7,6 +7,8 @@ import { Zap, BatteryWarning, BatteryCharging, CheckCircle2 } from "lucide-react
 import { Card } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 
+import { logEnergy } from "@/actions/energy"
+
 export function EnergyAudit() {
     const { tasks, auditTask } = useVibe()
 
@@ -14,7 +16,22 @@ export function EnergyAudit() {
     const tasksToAudit = tasks.filter((t) => t.status === "completed")
 
     // Sort by newest first or oldest? Probably oldest first to clear queue.
-    const stack = tasksToAudit.sort((a, b) => b.createdAt - a.createdAt)
+    const stack = tasksToAudit.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+    const handleAudit = async (taskId: string, energy: "green" | "red" | "yellow") => {
+        // Map swipe direction to energy level (0-100)
+        const levels = { green: 90, yellow: 50, red: 10 }
+
+        try {
+            // Log to separate analytics table
+            await logEnergy(levels[energy])
+        } catch (error) {
+            console.error("Failed to log energy:", error)
+        }
+
+        // Mark task as audited in local state/DB
+        auditTask(taskId, energy)
+    }
 
     if (stack.length === 0) {
         return (
@@ -43,7 +60,7 @@ export function EnergyAudit() {
                                 key={task.id}
                                 task={task}
                                 isTop={index === stack.length - 1}
-                                onSwipe={(energy) => auditTask(task.id, energy)}
+                                onSwipe={(energy) => handleAudit(task.id, energy)}
                             />
                         ) : null
                     ))}
