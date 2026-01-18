@@ -19,6 +19,7 @@ interface VibeContextType {
     addTask: (title: string) => void
     addTasksBulk: (titles: string[]) => void
     completeTask: (id: string) => void
+    updateTaskTitle: (id: string, title: string) => void
     auditTask: (id: string, energy: "green" | "red" | "yellow") => void
     streak: number
     addToStreak: () => void
@@ -131,6 +132,20 @@ export function VibeProvider({ children }: { children: React.ReactNode }) {
         if (error) console.error("Error completing task:", error)
     }
 
+    const updateTaskTitle = async (id: string, title: string) => {
+        // Optimistic update
+        setTasks((prev) =>
+            prev.map((t) => (t.id === id ? { ...t, title } : t))
+        )
+
+        const { error } = await supabase
+            .from("tasks")
+            .update({ title })
+            .eq("id", id)
+
+        if (error) console.error("Error updating task title:", error)
+    }
+
     const auditTask = async (id: string, energy: "green" | "red" | "yellow") => {
         // Optimistic update
         setTasks((prev) =>
@@ -158,6 +173,7 @@ export function VibeProvider({ children }: { children: React.ReactNode }) {
                 addTask,
                 addTasksBulk,
                 completeTask,
+                updateTaskTitle,
                 auditTask,
                 streak,
                 addToStreak,
