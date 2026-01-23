@@ -12,16 +12,18 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
-export function TaskFeed() {
+export function TaskFeed({ hideCompleted = false }: { hideCompleted?: boolean }) {
     const { tasks, completeTask, setActiveTaskId } = useVibe()
 
     // Sort: Pending first, then by date
-    const sortedTasks = [...tasks].sort((a, b) => {
-        if (a.status === b.status) {
-            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        }
-        return a.status === "pending" ? -1 : 1
-    })
+    const sortedTasks = [...tasks]
+        .filter((t) => !hideCompleted || (t.status !== "completed" && t.status !== "audited"))
+        .sort((a, b) => {
+            if (a.status === b.status) {
+                return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            }
+            return a.status === "pending" ? -1 : 1
+        })
 
     return (
         <div className="space-y-4">

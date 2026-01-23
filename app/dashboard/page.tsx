@@ -57,7 +57,7 @@ export default function DashboardPage() {
             <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
                 {/* Left Column: Tasks */}
                 <div className="md:col-span-8 space-y-6">
-                    <TaskFeed />
+                    <TaskFeed hideCompleted />
                     <EnergyChart />
                 </div>
 
