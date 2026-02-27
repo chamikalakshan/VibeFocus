@@ -20,6 +20,7 @@ interface VibeContextType {
     addTasksBulk: (titles: string[]) => void
     completeTask: (id: string) => void
     updateTaskTitle: (id: string, title: string) => void
+    deleteTask: (id: string) => void
     auditTask: (id: string, energy: "green" | "red" | "yellow") => void
     streak: number
     addToStreak: () => void
@@ -161,6 +162,22 @@ export function VibeProvider({ children }: { children: React.ReactNode }) {
         if (error) console.error("Error auditing task:", error)
     }
 
+    const deleteTask = async (id: string) => {
+        // Optimistic update
+        setTasks((prev) => prev.filter((t) => t.id !== id))
+
+        const { error } = await supabase
+            .from("tasks")
+            .delete()
+            .eq("id", id)
+
+        if (error) {
+            console.error("Error deleting task:", error)
+            // Re-fetch to restore state on error
+            if (user) fetchTasks(user.id)
+        }
+    }
+
     const addToStreak = () => {
         setStreak((prev) => prev + 1)
         // TODO: Persist streak in a 'profiles' table later
@@ -174,6 +191,7 @@ export function VibeProvider({ children }: { children: React.ReactNode }) {
                 addTasksBulk,
                 completeTask,
                 updateTaskTitle,
+                deleteTask,
                 auditTask,
                 streak,
                 addToStreak,

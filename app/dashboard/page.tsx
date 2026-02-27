@@ -31,33 +31,33 @@ export default function DashboardPage() {
     return (
         <div className="p-8 space-y-8 max-w-7xl mx-auto pb-24">
             {/* Header Section */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
-                <div className="space-y-1">
-                    <p className="text-muted-foreground uppercase tracking-widest text-xs font-medium">
-                        {new Date().toLocaleDateString("en-US", { weekday: 'long', month: 'long', day: 'numeric' })}
-                    </p>
-                    <h1 className="text-4xl font-bold tracking-tight">
-                        {greeting}, <span className="text-primary">{user?.email?.split('@')[0] || 'Viber'}</span>.
-                    </h1>
-                </div>
-
-                <form onSubmit={handleAddTask} className="flex w-full md:w-auto gap-2">
-                    <Input
-                        placeholder="What's the move?"
-                        value={newTask}
-                        onChange={(e) => setNewTask(e.target.value)}
-                        className="bg-card/50 backdrop-blur border-primary/20 focus-visible:ring-primary w-full md:w-64"
-                    />
-                    <Button type="submit" size="icon" className="shrink-0 bg-primary hover:bg-primary/90">
-                        <Plus className="w-5 h-5" />
-                    </Button>
-                </form>
+            <div className="space-y-1">
+                <p className="text-muted-foreground uppercase tracking-widest text-xs font-medium">
+                    {new Date().toLocaleDateString("en-US", { weekday: 'long', month: 'long', day: 'numeric' })}
+                </p>
+                <h1 className="text-4xl font-bold tracking-tight">
+                    {greeting}, <span className="text-primary">{user?.email?.split('@')[0] || 'Viber'}</span>.
+                </h1>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
                 {/* Left Column: Tasks */}
                 <div className="md:col-span-8 space-y-6">
-                    <TaskFeed hideCompleted />
+                    {/* Add Task Form — aligned with Your Flow */}
+                    <form onSubmit={handleAddTask} className="flex items-center gap-3">
+                        <Input
+                            placeholder="What's the move?"
+                            value={newTask}
+                            onChange={(e) => setNewTask(e.target.value)}
+                            className="bg-card/60 backdrop-blur border-primary/40 focus-visible:ring-primary text-base h-12 px-5 rounded-xl shadow-[0_0_20px_rgba(var(--primary-rgb),0.15)] flex-1"
+                        />
+                        <Button type="submit" className="shrink-0 bg-primary hover:bg-primary/90 h-12 px-5 rounded-xl shadow-[0_0_20px_rgba(var(--primary-rgb),0.3)] gap-2">
+                            <Plus className="w-4 h-4" />
+                            Add New Task
+                        </Button>
+                    </form>
+
+                    <TaskFeed hideCompleted hideOlderThanHours={24} />
                     <EnergyChart />
                 </div>
 

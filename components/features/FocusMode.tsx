@@ -8,14 +8,43 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 
+const STORAGE_KEY = (id: string) => `vibefocus_timer_${id}`
+
 export function FocusMode({ taskId }: { taskId: string }) {
     const { tasks, setActiveTaskId, completeTask, updateTaskTitle } = useVibe()
-    console.log("VibeContext values:", { hasUpdateTask: !!updateTaskTitle, updateTaskTitle })
     const task = tasks.find((t) => t.id === taskId)
 
-    const [duration, setDuration] = useState(25 * 60) // Default 25m
-    const [timeLeft, setTimeLeft] = useState(25 * 60)
-    const [isActive, setIsActive] = useState(false)
+    // ── Restore persisted timer state on mount ──────────────────────────────
+    const getInitialState = () => {
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY(taskId))
+            if (raw) {
+                const saved = JSON.parse(raw) as {
+                    duration: number
+                    timeLeft: number
+                    isActive: boolean
+                    savedAt: number
+                }
+                let restoredTimeLeft = saved.timeLeft
+                // If timer was running, subtract elapsed time since it was saved
+                if (saved.isActive) {
+                    const elapsed = Math.floor((Date.now() - saved.savedAt) / 1000)
+                    restoredTimeLeft = Math.max(0, saved.timeLeft - elapsed)
+                }
+                return {
+                    duration: saved.duration,
+                    timeLeft: restoredTimeLeft,
+                    isActive: saved.isActive && restoredTimeLeft > 0,
+                }
+            }
+        } catch { }
+        return { duration: 25 * 60, timeLeft: 25 * 60, isActive: false }
+    }
+
+    const initial = getInitialState()
+    const [duration, setDuration] = useState(initial.duration)
+    const [timeLeft, setTimeLeft] = useState(initial.timeLeft)
+    const [isActive, setIsActive] = useState(initial.isActive)
     const [vibeOn, setVibeOn] = useState(false)
     const [isDragging, setIsDragging] = useState(false)
     const [isEditing, setIsEditing] = useState(false)
@@ -40,6 +69,18 @@ export function FocusMode({ taskId }: { taskId: string }) {
 
     const dashOffset = circumference * (1 - progress)
 
+    // ── Persist timer state to localStorage on every change ────────────────
+    useEffect(() => {
+        try {
+            localStorage.setItem(STORAGE_KEY(taskId), JSON.stringify({
+                duration,
+                timeLeft,
+                isActive,
+                savedAt: Date.now(),
+            }))
+        } catch { }
+    }, [taskId, duration, timeLeft, isActive])
+
     useEffect(() => {
         let interval: NodeJS.Timeout
         if (isActive && timeLeft > 0) {
@@ -49,6 +90,8 @@ export function FocusMode({ taskId }: { taskId: string }) {
         } else if (timeLeft === 0) {
             setIsActive(false)
             setVibeOn(false)
+            // Clear storage when timer finishes naturally
+            try { localStorage.removeItem(STORAGE_KEY(taskId)) } catch { }
         }
         return () => clearInterval(interval)
     }, [isActive, timeLeft])
@@ -74,6 +117,7 @@ export function FocusMode({ taskId }: { taskId: string }) {
     }
 
     const handleComplete = () => {
+        try { localStorage.removeItem(STORAGE_KEY(taskId)) } catch { }
         completeTask(taskId)
         setActiveTaskId(null)
     }

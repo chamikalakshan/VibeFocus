@@ -11,11 +11,11 @@ export default function TaskPage() {
             <div className="space-y-2">
                 <h1 className="text-3xl font-bold tracking-tight">Today's Focus</h1>
                 <p className="text-muted-foreground text-lg">
-                    Capture what matters. clear the noise.
+                    Tasks from the last 7 days
                 </p>
             </div>
 
-            <TaskFeed hideCompleted={false} />
+            <TaskFeed hideCompleted={false} hideOlderThanHours={168} showViewAll={false} />
         </div>
     )
 }
