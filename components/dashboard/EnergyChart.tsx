@@ -1,42 +1,66 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { getEnergyHistory } from "@/actions/energy"
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts"
 import { Card } from "@/components/ui/card"
-import { Loader2 } from "lucide-react"
+import { AlertCircle, BatteryCharging, Loader2, RefreshCw } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/ui/empty-state"
 
 export function EnergyChart() {
     const [data, setData] = useState<{ level: number, created_at: string }[]>([])
     const [loading, setLoading] = useState(true)
+    const [error, setError] = useState("")
+
+    const load = useCallback(() => {
+        setLoading(true)
+        setError("")
+        getEnergyHistory().then((result) => {
+            setData(result.data)
+            setError(result.error ?? "")
+            setLoading(false)
+        }).catch(() => {
+            setError("Unable to load energy history.")
+            setLoading(false)
+        })
+    }, [])
 
     useEffect(() => {
-        getEnergyHistory().then((history) => {
-            setData(history)
+        getEnergyHistory().then((result) => {
+            setData(result.data)
+            setError(result.error ?? "")
+            setLoading(false)
+        }).catch(() => {
+            setError("Unable to load energy history.")
             setLoading(false)
         })
     }, [])
 
     if (loading) {
         return (
-            <div className="flex h-[200px] items-center justify-center">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <div aria-busy="true" className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
+                <Loader2 className="mr-2 h-6 w-6 animate-spin" />Loading energy trends
             </div>
         )
     }
+
+    if (error) return <Card className="flex min-h-[200px] flex-col items-center justify-center gap-3 p-6 text-center"><AlertCircle className="size-6 text-[var(--warning)]" /><div><p className="font-semibold">Energy trends are unavailable</p><p className="mt-1 text-sm text-muted-foreground">{error}</p></div><Button size="sm" variant="outline" onClick={load}><RefreshCw />Retry</Button></Card>
 
     if (data.length === 0) {
-        return (
-            <div className="flex h-[200px] items-center justify-center text-muted-foreground text-sm border border-dashed rounded-xl">
-                No energy data yet. Complete and audit tasks!
-            </div>
-        )
+        return <EmptyState icon={BatteryCharging} title="No energy pattern yet" description="Complete and audit a few tasks to reveal how different work affects you." />
     }
 
+    const average = Math.round(data.reduce((sum, point) => sum + point.level, 0) / data.length)
+    const high = Math.max(...data.map((point) => point.level))
+    const low = Math.min(...data.map((point) => point.level))
+    const summary = `${data.length} energy audits from the last seven days. Average ${average} percent, highest ${high} percent, lowest ${low} percent.`
+
     return (
-        <Card className="p-6 bg-black/40 border-white/5 backdrop-blur-xl">
-            <h3 className="text-sm font-medium text-muted-foreground mb-4">Energy Trends</h3>
-            <div className="h-[200px] w-full">
+        <Card className="p-6">
+            <h3 className="mb-4 text-sm font-semibold tracking-[-0.015em]">Energy trends</h3>
+            <p className="mb-4 text-sm text-muted-foreground">{summary}</p>
+            <div role="img" aria-label={summary} className="h-[200px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={data}>
                         <defs>
@@ -51,9 +75,9 @@ export function EnergyChart() {
                         />
                         <YAxis hide domain={[0, 100]} />
                         <Tooltip
-                            contentStyle={{ backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: "8px" }}
-                            itemStyle={{ color: "#fff" }}
-                            formatter={(value: any) => [`${value}%`, "Energy"]}
+                            contentStyle={{ backgroundColor: "var(--surface-elevated)", border: "1px solid var(--border-default)", borderRadius: "12px" }}
+                            itemStyle={{ color: "var(--text-primary)" }}
+                            formatter={(value: number | string | undefined) => [`${value ?? 0}%`, "Energy"]}
                             labelFormatter={() => ""}
                         />
                         <Area

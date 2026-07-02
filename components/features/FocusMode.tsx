@@ -3,111 +3,183 @@
 import { useState, useEffect, useRef } from "react"
 import { useVibe } from "@/context/VibeContext"
 import { motion } from "framer-motion"
-import { X, Play, Pause, Check, Music, RotateCcw, Timer } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
-import { cn } from "@/lib/utils"
+import { startFocusSession, updateFocusSession, type RestoredFocusSession } from "@/actions/focus"
+import { pauseTimer, remainingSeconds, resumeTimer, type TimerState } from "@/lib/domain/timer"
+import { builtinAudioSource, isFocusAudioSource, parseFocusAudioPreference, type FocusAudioSource } from "@/lib/domain/audio-source"
+import { FocusAudioSourceDialog } from "@/components/features/FocusAudioSourceDialog"
+import { FocusAudioPanel, FocusControls, FocusTimerHero, FocusTopBar, SessionDetailsPanel } from "@/components/features/FocusSessionUI"
 
 const STORAGE_KEY = (id: string) => `vibefocus_timer_${id}`
+const AUDIO_SOURCE_KEY = "vibefocus_focus_audio_source"
+const AUDIO_PREFERENCE_KEY = "vibefocus_focus_audio_preference"
 
-export function FocusMode({ taskId }: { taskId: string }) {
+export function FocusMode({ taskId, restoredSession }: { taskId: string; restoredSession?: RestoredFocusSession | null }) {
     const { tasks, setActiveTaskId, completeTask, updateTaskTitle } = useVibe()
     const task = tasks.find((t) => t.id === taskId)
 
     // ── Restore persisted timer state on mount ──────────────────────────────
     const getInitialState = () => {
+        const serverState = restoredSession ? {
+            duration: restoredSession.plannedSeconds,
+            timeLeft: restoredSession.remainingSeconds,
+            timer: {
+                status: restoredSession.status,
+                endsAt: restoredSession.endsAt,
+                remainingSeconds: restoredSession.remainingSeconds,
+            } satisfies TimerState,
+            sessionId: restoredSession.id,
+        } : null
+        if (serverState) return serverState
         try {
             const raw = localStorage.getItem(STORAGE_KEY(taskId))
             if (raw) {
                 const saved = JSON.parse(raw) as {
                     duration: number
-                    timeLeft: number
-                    isActive: boolean
-                    savedAt: number
+                    timeLeft?: number
+                    isActive?: boolean
+                    savedAt?: number
+                    status?: TimerState["status"]
+                    endsAt?: string | null
+                    remainingSeconds?: number
+                    sessionId?: string | null
                 }
-                let restoredTimeLeft = saved.timeLeft
-                // If timer was running, subtract elapsed time since it was saved
-                if (saved.isActive) {
-                    const elapsed = Math.floor((Date.now() - saved.savedAt) / 1000)
-                    restoredTimeLeft = Math.max(0, saved.timeLeft - elapsed)
+                const legacyRemaining = saved.timeLeft ?? 25 * 60
+                const legacyEndsAt = saved.isActive && saved.savedAt
+                    ? new Date(saved.savedAt + legacyRemaining * 1000).toISOString()
+                    : null
+                const timer: TimerState = {
+                    status: saved.status ?? (saved.isActive ? "running" : "paused"),
+                    endsAt: saved.endsAt ?? legacyEndsAt,
+                    remainingSeconds: saved.remainingSeconds ?? legacyRemaining,
                 }
-                return {
+                const restoredTimeLeft = remainingSeconds(timer)
+                const localState = {
                     duration: saved.duration,
                     timeLeft: restoredTimeLeft,
-                    isActive: saved.isActive && restoredTimeLeft > 0,
+                    timer: restoredTimeLeft > 0 ? timer : { status: "completed", endsAt: null, remainingSeconds: 0 } satisfies TimerState,
+                    sessionId: saved.sessionId ?? null,
                 }
+                return localState
             }
         } catch { }
-        return { duration: 25 * 60, timeLeft: 25 * 60, isActive: false }
+        return { duration: 25 * 60, timeLeft: 25 * 60, timer: { status: "paused", endsAt: null, remainingSeconds: 25 * 60 } satisfies TimerState, sessionId: null }
     }
 
-    const initial = getInitialState()
+    const [initial] = useState(getInitialState)
     const [duration, setDuration] = useState(initial.duration)
     const [timeLeft, setTimeLeft] = useState(initial.timeLeft)
-    const [isActive, setIsActive] = useState(initial.isActive)
+    const [timer, setTimer] = useState<TimerState>(initial.timer)
     const [vibeOn, setVibeOn] = useState(false)
+    const [volume, setVolume] = useState(0.45)
+    const [audioSource, setAudioSource] = useState<FocusAudioSource>(builtinAudioSource)
+    const [audioSourceLoaded, setAudioSourceLoaded] = useState(false)
+    const [audioSourceOpen, setAudioSourceOpen] = useState(false)
+    const volumeRef = useRef(volume)
+    useEffect(() => {
+        const timeout = window.setTimeout(() => {
+            try {
+                const preference = parseFocusAudioPreference(JSON.parse(localStorage.getItem(AUDIO_PREFERENCE_KEY) ?? "null"))
+                const legacySource = JSON.parse(localStorage.getItem(AUDIO_SOURCE_KEY) ?? "null")
+                if (preference) {
+                    setAudioSource(preference.source)
+                    setVolume(preference.volume)
+                    volumeRef.current = preference.volume
+                } else if (isFocusAudioSource(legacySource)) {
+                    setAudioSource(legacySource)
+                }
+            } catch { }
+            setAudioSourceLoaded(true)
+        }, 0)
+        return () => window.clearTimeout(timeout)
+    }, [])
     const [isDragging, setIsDragging] = useState(false)
     const [isEditing, setIsEditing] = useState(false)
     const [title, setTitle] = useState(task?.title || "")
-
-    useEffect(() => {
-        if (task) setTitle(task.title)
-    }, [task?.title])
+    const [sessionId, setSessionId] = useState<string | null>(initial.sessionId)
+    const [announcement, setAnnouncement] = useState("")
+    const isActive = timer.status === "running"
 
     const audioRef = useRef<HTMLAudioElement | null>(null)
     const ringRef = useRef<HTMLDivElement>(null)
 
-    // SVG Circle Props
-    const radius = 120
-    const circumference = 2 * Math.PI * radius
-
-    // When active, progress is based on time left (0 to 1). 
-    // When dragging/setting, it's based on how much of 60m is selected (0 to 1).
     const progress = isActive
-        ? timeLeft / duration   // Active: Depletes from 1 to 0 based on session length
-        : duration / (60 * 60)  // Inactive: Shows how much of 60m dial is filled
+        ? timeLeft / duration
+        : duration / (60 * 60)
+    const sandProgress = timeLeft / duration
 
-    const dashOffset = circumference * (1 - progress)
-
-    // ── Persist timer state to localStorage on every change ────────────────
     useEffect(() => {
         try {
             localStorage.setItem(STORAGE_KEY(taskId), JSON.stringify({
                 duration,
-                timeLeft,
-                isActive,
-                savedAt: Date.now(),
+                ...timer,
+                remainingSeconds: timeLeft,
+                sessionId,
             }))
         } catch { }
-    }, [taskId, duration, timeLeft, isActive])
+    }, [taskId, duration, timeLeft, timer, sessionId])
 
     useEffect(() => {
-        let interval: NodeJS.Timeout
-        if (isActive && timeLeft > 0) {
-            interval = setInterval(() => {
-                setTimeLeft((prev) => prev - 1)
-            }, 1000)
-        } else if (timeLeft === 0) {
-            setIsActive(false)
-            setVibeOn(false)
-            // Clear storage when timer finishes naturally
-            try { localStorage.removeItem(STORAGE_KEY(taskId)) } catch { }
+        if (!isActive) return
+        const tick = () => setTimeLeft(remainingSeconds(timer))
+        tick()
+        const interval = window.setInterval(tick, 250)
+        return () => window.clearInterval(interval)
+    }, [isActive, timer])
+
+    useEffect(() => {
+        if (timeLeft === 0 && timer.status === "running") {
+            const timeout = window.setTimeout(() => {
+                setTimer({ status: "completed", endsAt: null, remainingSeconds: 0 })
+                setVibeOn(false)
+                setAnnouncement("Focus timer completed.")
+                if (sessionId) void updateFocusSession(sessionId, "completed", 0)
+                try { localStorage.removeItem(STORAGE_KEY(taskId)) } catch { }
+            }, 0)
+            return () => window.clearTimeout(timeout)
         }
-        return () => clearInterval(interval)
-    }, [isActive, timeLeft])
+    }, [timeLeft, taskId, timer.status, sessionId])
 
     useEffect(() => {
+        if (!audioSourceLoaded) return
+        try {
+            localStorage.setItem(AUDIO_SOURCE_KEY, JSON.stringify(audioSource))
+            localStorage.setItem(AUDIO_PREFERENCE_KEY, JSON.stringify({ version: 1, source: audioSource, volume: volumeRef.current }))
+        } catch { }
+    }, [audioSource, audioSourceLoaded])
+
+    const updateVolume = (nextVolume: number) => {
+        volumeRef.current = nextVolume
+        setVolume(nextVolume)
+        if (!audioSourceLoaded) return
+        try {
+            localStorage.setItem(AUDIO_PREFERENCE_KEY, JSON.stringify({ version: 1, source: audioSource, volume: nextVolume }))
+        } catch { }
+    }
+
+    useEffect(() => {
+        if (audioSource.kind !== "builtin") {
+            audioRef.current?.pause()
+            return
+        }
+        if (audioRef.current) audioRef.current.volume = volume
         if (vibeOn && isActive) {
             audioRef.current?.play().catch(() => { })
         } else {
             audioRef.current?.pause()
         }
-    }, [vibeOn, isActive])
+    }, [audioSource.kind, vibeOn, isActive, volume])
 
-    const handleReset = () => {
-        setIsActive(false)
-        setDuration(25 * 60)
-        setTimeLeft(25 * 60)
+    const close = () => {
+        if (isActive && !window.confirm("Leave this focus session? Your timer will remain saved so you can return.")) return
+        setActiveTaskId(null)
+    }
+    const reset = () => {
+        if (isActive && !window.confirm("Reset this focus timer?")) return
+        setTimeLeft(duration)
+        setTimer({ status: "paused", endsAt: null, remainingSeconds: duration })
+        setAnnouncement("Focus timer reset.")
+        if (sessionId) void updateFocusSession(sessionId, "cancelled", timeLeft)
+        setSessionId(null)
     }
 
     const formatTime = (seconds: number) => {
@@ -118,8 +190,25 @@ export function FocusMode({ taskId }: { taskId: string }) {
 
     const handleComplete = () => {
         try { localStorage.removeItem(STORAGE_KEY(taskId)) } catch { }
+        setTimer({ status: "completed", endsAt: null, remainingSeconds: timeLeft })
+        setAnnouncement("Task completed.")
         completeTask(taskId)
+        if (sessionId) void updateFocusSession(sessionId, "completed", timeLeft)
         setActiveTaskId(null)
+    }
+
+    const toggleTimer = async () => {
+        const nextTimer = isActive
+            ? pauseTimer(timer)
+            : resumeTimer({ ...timer, status: "paused", remainingSeconds: timeLeft })
+        if (!isActive && !sessionId) {
+            try { setSessionId(await startFocusSession(taskId, duration)) } catch { /* local timer remains available offline */ }
+        } else if (sessionId) {
+            try { await updateFocusSession(sessionId, isActive ? "paused" : "running", timeLeft) } catch { /* sync can retry later */ }
+        }
+        setTimeLeft(remainingSeconds(nextTimer))
+        setTimer(nextTimer)
+        setAnnouncement(isActive ? "Focus timer paused." : "Focus timer started.")
     }
 
     const handleTitleSave = () => {
@@ -128,6 +217,35 @@ export function FocusMode({ taskId }: { taskId: string }) {
         }
         setIsEditing(false)
     }
+
+    const editDuration = () => {
+        const value = window.prompt("Focus duration in minutes", String(Math.round(duration / 60)))
+        if (!value) return
+        const minutes = Math.max(1, Math.min(60, Number.parseInt(value, 10)))
+        if (!Number.isFinite(minutes)) return
+        const seconds = minutes * 60
+        setDuration(seconds)
+        setTimeLeft(seconds)
+        setTimer({ status: "paused", endsAt: null, remainingSeconds: seconds })
+    }
+
+    const toggleFullscreen = () => {
+        if (document.fullscreenElement) void document.exitFullscreen()
+        else void document.documentElement.requestFullscreen()
+    }
+
+    useEffect(() => {
+        const handleShortcut = (event: KeyboardEvent) => {
+            const target = event.target as HTMLElement | null
+            if (target?.matches("input, textarea, select, button, a, [contenteditable=true]")) return
+            if (event.code === "Space") { event.preventDefault(); void toggleTimer() }
+            if (event.key === "Enter") { event.preventDefault(); handleComplete() }
+            if (event.key.toLowerCase() === "r") { event.preventDefault(); reset() }
+            if (event.key === "Escape") close()
+        }
+        window.addEventListener("keydown", handleShortcut)
+        return () => window.removeEventListener("keydown", handleShortcut)
+    })
 
     // Interaction Logic for Circular Slider
     const handleInteraction = (clientX: number, clientY: number) => {
@@ -166,6 +284,7 @@ export function FocusMode({ taskId }: { taskId: string }) {
         const newSeconds = effectiveMins * 60
         setDuration(newSeconds)
         setTimeLeft(newSeconds)
+        setTimer({ status: "paused", endsAt: null, remainingSeconds: newSeconds })
     }
 
     const onMouseDown = (e: React.MouseEvent) => {
@@ -204,152 +323,20 @@ export function FocusMode({ taskId }: { taskId: string }) {
     if (!task) return null
 
     return (
-        <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background/95 backdrop-blur-md p-6 select-none"
-        >
-            <div className="absolute top-6 left-6">
-                <Button variant="ghost" size="icon" onClick={() => setActiveTaskId(null)} className="rounded-full hover:bg-muted">
-                    <X className="w-6 h-6" />
-                </Button>
-            </div>
-
-            <div className="flex flex-col items-center gap-8 max-w-md w-full">
-                <div className="text-center space-y-2">
-                    <h2 className="text-xl font-medium text-muted-foreground uppercase tracking-widest flex items-center justify-center gap-2">
-                        <Timer className="w-4 h-4" /> Focus Session
-                    </h2>
-                    {isEditing ? (
-                        <input
-                            autoFocus
-                            value={title}
-                            onChange={(e) => setTitle(e.target.value)}
-                            onBlur={handleTitleSave}
-                            onKeyDown={(e) => e.key === "Enter" && handleTitleSave()}
-                            className="text-3xl md:text-4xl font-bold bg-transparent text-white text-center w-full outline-none border-b border-white/20 pb-2"
-                        />
-                    ) : (
-                        <h1
-                            onClick={() => !isActive && setIsEditing(true)}
-                            className={cn(
-                                "text-3xl md:text-4xl font-bold bg-gradient-to-br from-white to-zinc-400 bg-clip-text text-transparent cursor-pointer hover:opacity-80 transition-opacity",
-                                isActive && "cursor-default hover:opacity-100"
-                            )}
-                        >
-                            {task.title}
-                        </h1>
-                    )}
-                </div>
-
-                {/* Interactive Timer Display */}
-                <div
-                    ref={ringRef}
-                    className={cn(
-                        "relative w-[300px] h-[300px] flex items-center justify-center rounded-full transition-shadow duration-300",
-                        !isActive && "cursor-pointer hover:shadow-[0_0_30px_rgba(74,222,128,0.2)]"
-                    )}
-                    onMouseDown={onMouseDown}
-                    onMouseMove={onMouseMove}
-                    onTouchStart={onTouchStart}
-                    onTouchMove={onTouchMove}
-                >
-                    {/* SVG Progress Ring */}
-                    <svg className="absolute inset-0 w-full h-full -rotate-90 drop-shadow-[0_0_15px_rgba(74,222,128,0.3)] pointer-events-none">
-                        {/* Background track */}
-                        <circle
-                            cx="150"
-                            cy="150"
-                            r={radius}
-                            className="stroke-secondary/20 fill-none"
-                            strokeWidth="12"
-                        />
-                        {/* Animated Red Progress */}
-                        <circle
-                            cx="150"
-                            cy="150"
-                            r={radius}
-                            className="stroke-energy-green fill-none"
-                            strokeWidth="12"
-                            strokeLinecap="round"
-                            style={{
-                                strokeDasharray: circumference,
-                                strokeDashoffset: dashOffset,
-                                transition: isActive ? "stroke-dashoffset 1s linear" : "none"
-                            }}
-                        />
-                    </svg>
-
-                    {/* We use a separate div for the visual knob to make rotation easier */}
-                    {!isActive && (
-                        <div
-                            className="absolute inset-0 pointer-events-none"
-                            style={{ transform: `rotate(${progress * 360}deg)` }}
-                        >
-                            <div className="absolute top-[18px] left-1/2 -translate-x-1/2 w-6 h-6 bg-white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.5)]" />
-                        </div>
-                    )}
-
-                    <div className="flex flex-col items-center z-10 pointer-events-none">
-                        <span className="text-7xl font-mono font-bold tracking-tighter tabular-nums text-foreground drop-shadow-2xl">
-                            {formatTime(timeLeft)}
-                        </span>
-                        {!isActive && (
-                            <span className="text-xs text-muted-foreground mt-2 uppercase tracking-wide">
-                                Drag ring to set
-                            </span>
-                        )}
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="focus-backdrop fixed inset-0 z-50 overflow-y-auto p-3 text-foreground select-none sm:p-4">
+            <p className="sr-only" aria-live="polite">{announcement}</p>
+            <div className="mx-auto flex min-h-full w-full max-w-[1600px] flex-col gap-4">
+                <FocusTopBar onExit={close} onSettings={() => setAudioSourceOpen(true)} onFullscreen={toggleFullscreen} />
+                <div className="grid flex-1 items-center gap-4 py-2 md:grid-cols-2 lg:grid-cols-[minmax(15rem,21rem)_minmax(29rem,1fr)_minmax(16rem,22rem)] lg:gap-6">
+                    <SessionDetailsPanel task={task} duration={duration} canEdit={!isActive} onEditTask={() => setIsEditing(true)} onEditDuration={editDuration} />
+                    <div className="order-first flex flex-col items-center md:col-span-2 lg:order-none lg:col-span-1">
+                        <FocusTimerHero title={task.title} time={formatTime(timeLeft)} progress={progress} sandProgress={sandProgress} isActive={isActive} isEditing={isEditing} editedTitle={title} onEditedTitleChange={setTitle} onEditStart={() => !isActive && setIsEditing(true)} onEditSave={handleTitleSave} ringRef={ringRef} ringHandlers={{ onMouseDown, onMouseMove, onTouchStart, onTouchMove }} />
+                        <FocusControls isActive={isActive} onToggle={() => void toggleTimer()} onComplete={handleComplete} onReset={reset} />
                     </div>
-                </div>
-
-                {/* Main Controls */}
-                <div className="flex items-center gap-6 mt-4">
-                    <Button
-                        size="lg"
-                        className={cn(
-                            "h-20 w-20 rounded-full text-2xl shadow-lg transition-all hover:scale-105 active:scale-95 border-4 border-transparent z-10",
-                            isActive
-                                ? "bg-amber-500 hover:bg-amber-600 shadow-amber-500/20"
-                                : "bg-energy-green hover:bg-energy-green/90 text-black shadow-energy-green/30 border-energy-green/20"
-                        )}
-                        onClick={() => setIsActive(!isActive)}
-                    >
-                        {isActive ? <Pause className="fill-current w-8 h-8" /> : <Play className="fill-current ml-1 w-8 h-8" />}
-                    </Button>
-
-                    <Button
-                        size="lg"
-                        variant="outline"
-                        className="h-16 px-8 rounded-full border-2 border-energy-green/50 text-energy-green hover:bg-energy-green hover:text-white font-bold transition-all"
-                        onClick={handleComplete}
-                    >
-                        <Check className="w-5 h-5 mr-2" /> Complete
-                    </Button>
-                </div>
-
-                {/* Vibe Switch */}
-                <div className="flex items-center gap-4 p-4 rounded-2xl bg-secondary/30 backdrop-blur border border-white/5 mt-4 w-full max-w-xs transition-opacity hover:bg-secondary/40">
-                    <div className={cn(
-                        "p-3 rounded-full transition-colors",
-                        vibeOn ? "bg-purple-500/20 text-purple-400" : "bg-muted text-muted-foreground"
-                    )}>
-                        <Music className="w-5 h-5" />
-                    </div>
-                    <div className="flex flex-col flex-1">
-                        <span className="font-semibold text-sm">Lo-Fi Radio</span>
-                        <span className="text-xs text-muted-foreground">
-                            {vibeOn ? "Beats to study to" : "Simple ambiance"}
-                        </span>
-                    </div>
-                    <Switch
-                        checked={vibeOn}
-                        onCheckedChange={setVibeOn}
-                        className="data-[state=checked]:bg-purple-600"
-                    />
+                    <FocusAudioPanel source={audioSource} enabled={vibeOn} active={isActive} volume={volume} onEnabledChange={setVibeOn} onVolumeChange={updateVolume} onSourceChange={setAudioSource} onOpenSettings={() => setAudioSourceOpen(true)} />
                 </div>
             </div>
-
+            <FocusAudioSourceDialog open={audioSourceOpen} onOpenChange={setAudioSourceOpen} source={audioSource} onSourceChange={(source) => { setAudioSource(source); setVibeOn(true) }} />
             <audio
                 ref={audioRef}
                 loop

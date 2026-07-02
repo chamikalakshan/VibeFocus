@@ -1,30 +1,14 @@
 'use server'
 
 import { createClient } from "@/utils/supabase/server"
-import { revalidatePath } from "next/cache"
 
-export async function logEnergy(level: number) {
+export async function saveEnergyCheckin(level: "low" | "medium" | "high") {
     const supabase = await createClient()
-
     const { data: { user } } = await supabase.auth.getUser()
-
-    if (!user) {
-        throw new Error("User not authenticated")
-    }
-
-    const { error } = await supabase
-        .from('energy_logs')
-        .insert({
-            user_id: user.id,
-            level: level,
-        })
-
-    if (error) {
-        console.error('Error logging energy:', error)
-        throw new Error('Failed to log energy')
-    }
-
-    revalidatePath('/dashboard')
+    if (!user) return { ok: false }
+    const numericLevel = level === "low" ? 2 : level === "high" ? 4 : 3
+    const { error } = await supabase.from("energy_checkins").insert({ user_id: user.id, level: numericLevel, checked_at: new Date().toISOString() })
+    return { ok: !error }
 }
 
 export async function getEnergyHistory(days: number = 7) {
@@ -33,20 +17,33 @@ export async function getEnergyHistory(days: number = 7) {
     const { data: { user } } = await supabase.auth.getUser()
 
     if (!user) {
-        return []
+        return { data: [], error: "Authentication required" }
     }
 
+    const since = new Date()
+    since.setDate(since.getDate() - days)
     const { data, error } = await supabase
-        .from('energy_logs')
-        .select('*')
+        .from('task_energy_audits')
+        .select('rating, audited_at')
         .eq('user_id', user.id)
-        .order('created_at', { ascending: true })
+        .gte('audited_at', since.toISOString())
+        .order('audited_at', { ascending: true })
         .limit(100) // Safety limit
 
     if (error) {
-        console.error('Error fetching energy history:', error)
-        return []
+        const legacy = await supabase
+            .from("energy_logs")
+            .select("level, created_at")
+            .eq("user_id", user.id)
+            .gte("created_at", since.toISOString())
+            .order("created_at", { ascending: true })
+            .limit(100)
+        if (legacy.error) return { data: [], error: "Energy history is unavailable until the analytics schema is applied." }
+        return { data: legacy.data, error: null }
     }
 
-    return data
+    return { data: data.map((audit) => ({
+        level: audit.rating === "energizing" ? 90 : audit.rating === "draining" ? 10 : 50,
+        created_at: audit.audited_at,
+    })), error: null }
 }

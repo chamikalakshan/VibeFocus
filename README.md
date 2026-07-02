@@ -1,85 +1,80 @@
-# ⚡ VibeFocus
+# VibeFocus
 
-**Gen Z Professional Habit Tracker**
+VibeFocus is an energy-aware productivity PWA for planning tasks, running deep-work sessions, auditing how work felt, and learning from personal productivity patterns.
 
-VibeFocus is a mobile-first Progressive Web App (PWA) designed for the modern professional. It combines robust task management with energy auditing and deep work tools to help you maintain momentum and avoid burnout.
+## Features
 
-## ✨ Features
+- Google OAuth and email magic-link authentication through Supabase
+- Quick tasks plus priority, due date, estimate, category, required energy, and recurrence planning
+- Today planning with current-energy selection and deterministic focus suggestions
+- Premium mobile bottom navigation, collapsible desktop sidebar, and contextual sync status
+- Searchable Inbox, Today, Upcoming, Completed, and All task views with visible metadata
+- Capability-gated Projects and Goals with offline/sync foundations
+- Timestamp-restored focus timers and persistent focus-session history
+- Accessible swipe, button, and keyboard-friendly energy auditing
+- Persistent streak database model and task/focus/energy analytics foundations
+- Dark, light, and system themes with account settings
+- Bulk Import preview and server-only OpenAI-assisted structured import
+- Installable PWA shell, offline fallback, IndexedDB mutation queue, and reconnect sync endpoint
+- Browser notifications, web-push subscriptions, and Supabase Edge Function delivery
+- Explicit RLS policies for every user-owned table
 
-- **🎯 Focus Mode**: Dedicated timer interface for deep work sessions with audio ambiance.
-- **🔋 Energy Audit**: Unique task tagging system (Green 🟢, Yellow 🟡, Red 🔴) to manage energy expenditure.
-- **📊 Dashboard Hub**: Centralized view for daily progress, gamified streaks, and quick actions.
-- **📝 Task Management**:
-  - **Task Feed**: Dynamic feed of pending tasks.
-  - **Smart Filtering**: Automatic filtering of completed tasks (accessible via distinct views).
-  - **Secure Data**: Row Level Security (RLS) ensuring privacy.
-- **📱 PWA Ready**: Installable on mobile devices with native app-like feel.
-- **🌗 Dark Mode**: Sleek, battery-friendly dark interface.
+## Stack
 
-## 🛠 Explore the Stack
+Next.js 16 App Router, React 19, TypeScript, Tailwind CSS 4, Radix UI, Framer Motion, Recharts, Supabase, OpenAI, IndexedDB, Vitest, and Playwright.
 
-- **Framework**: [Next.js 16 (App Router)](https://nextjs.org/)
-- **Language**: [TypeScript](https://www.typescriptlang.org/)
-- **Styling**: [Tailwind CSS v4](https://tailwindcss.com/)
-- **UI Components**: [Radix UI](https://www.radix-ui.com/) & [Lucide React](https://lucide.dev/)
-- **Animations**: [Framer Motion](https://www.framer.com/motion/)
-- **Backend & Auth**: [Supabase](https://supabase.com/)
-- **Charts**: [Recharts](https://recharts.org/)
+## Local Setup
 
-## 🚀 Getting Started
-
-### Prerequisites
-
-- Node.js 18+
-- npm, pnpm, or bun
-
-### Installation
-
-1.  **Clone the repository**
-    ```bash
-    git clone https://github.com/yourusername/vibefocus.git
-    cd vibefocus
-    ```
-
-2.  **Install dependencies**
-    ```bash
-    npm install
-    # or
-    pnpm install
-    ```
-
-3.  **Environment Setup**
-    Create a `.env.local` file in the root directory and add your Supabase credentials:
-
-    ```env
-    NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
-    NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-    ```
-
-4.  **Run the development server**
-    ```bash
-    npm run dev
-    ```
-
-    Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-## 📂 Project Structure
+Requirements: Node.js 22+, npm, and a Supabase project or local Supabase CLI environment.
 
 ```bash
-vibefocus/
-├── app/                  # Next.js App Router pages and layouts
-│   ├── dashboard/        # Main authenticated application views
-│   ├── login/            # Authentication pages
-│   └── api/              # API routes (if any)
-├── components/           # Reusable UI components
-│   ├── dashboard/        # Dashboard-specific widgets (Streak, EnergyChart)
-│   ├── features/         # Feature components (FocusMode, EnergyAudit)
-│   └── ui/               # Generic UI primitives (Buttons, Inputs)
-├── context/              # React Context (VibeContext, ThemeProvider)
-├── utils/                # Helper functions and Supabase client
-└── public/               # Static assets
+npm install
+cp .env.example .env.local
+npm run dev
 ```
 
-## 📄 License
+Set the public Supabase URL and anonymous key before starting. Optional server-only variables enable AI import, push delivery, cron protection, and monitoring. Never expose `OPENAI_API_KEY`, `VAPID_PRIVATE_KEY`, `CRON_SECRET`, or a Supabase service-role key to browser code.
 
-This project is licensed under the MIT License.
+## Database
+
+The canonical database source is `supabase/migrations`. Back up production, link the Supabase CLI, then apply migrations in order:
+
+```bash
+supabase db push
+```
+
+Repository commands are also available as `npm run db:start`, `npm run db:reset`, `npm run db:lint`, and `npm run db:push`.
+
+The foundation migration preserves task IDs, backfills legacy completion fields, converts legacy task energy values into audits, and enables RLS. See `docs/DATABASE_SCHEMA.md`.
+
+## Validation
+
+```bash
+npm run typecheck
+npm run lint
+npm run test
+npx playwright install chromium
+npm run test:e2e
+npm run test:db
+npm run build
+```
+
+## PWA and Offline Testing
+
+Service workers register only in production. Run `npm run build && npm run start`, open the app through localhost or HTTPS, confirm `/manifest.webmanifest` and `/sw.js`, then use browser developer tools to test offline reload and reconnect synchronization. Authenticated API responses are deliberately excluded from service-worker caching.
+
+## Production Setup
+
+Deploy the Next.js application to Vercel. Apply migrations and deploy `supabase/functions/send-reminders` and `supabase/functions/delete-account` to Supabase. Configure OAuth redirect URLs, magic-link redirect URLs, VAPID keys, the OpenAI key, Edge Function secrets, and a Supabase Cron schedule.
+
+More detail:
+
+- `AGENTS.md`: engineering rules and commands
+- `docs/DATABASE_SCHEMA.md`: schema and migration strategy
+- `docs/TESTING.md`: automated and manual testing
+- `docs/DEPLOYMENT.md`: Vercel, Supabase, push, and external setup
+- `docs/IMPLEMENTATION_PROGRESS.md`: current implementation status
+
+## Known External Requirements
+
+Applying production migrations, deploying Edge Functions, creating the Supabase Cron job, configuring OAuth, and supplying OpenAI/VAPID credentials require access to the repository owner’s external accounts.

@@ -1,18 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { VibeProvider } from "@/context/VibeContext";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import { PwaProvider } from "@/components/pwa/PwaProvider";
 
 export const metadata: Metadata = {
   title: "VibeFocus",
@@ -36,7 +26,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body
         suppressHydrationWarning
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
+        className="antialiased bg-background text-foreground"
       >
         <ThemeProvider
           attribute="class"
@@ -45,7 +35,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <VibeProvider>
-            {children}
+            <PwaProvider>{children}</PwaProvider>
           </VibeProvider>
         </ThemeProvider>
       </body>
